@@ -67,17 +67,19 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: {
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
+  const isDragging = useRef(false);
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
-    if (selected && mesh.current) {
+    if (selected && mesh.current && e.shiftKey) {
+      isDragging.current = true;
       dragStart.current = new THREE.Vector3();
       mesh.current.getWorldPosition(dragStart.current);
     }
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragStart.current || !selected || !positionAttribute || !mesh.current) return;
+    if (!isDragging.current || !dragStart.current || !selected || !positionAttribute || !mesh.current) return;
 
     const pointer = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
     const delta = pointer.sub(dragStart.current);
@@ -98,13 +100,13 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: {
       }
     }
 
-    // Update geometry
     positionAttribute.needsUpdate = true;
     geometry.computeVertexNormals();
     dragStart.current.copy(pointer);
   };
 
   const onPointerUp = () => {
+    isDragging.current = false;
     dragStart.current = undefined;
   };
 
