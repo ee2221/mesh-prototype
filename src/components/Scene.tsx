@@ -68,6 +68,7 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: {
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
   const isDragging = useRef(false);
+  const { controls } = useThree();
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
@@ -75,6 +76,10 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: {
       isDragging.current = true;
       dragStart.current = new THREE.Vector3();
       mesh.current.getWorldPosition(dragStart.current);
+      // Disable OrbitControls when starting vertex drag
+      if (controls) {
+        (controls as any).enabled = false;
+      }
     }
   };
 
@@ -108,6 +113,10 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: {
   const onPointerUp = () => {
     isDragging.current = false;
     dragStart.current = undefined;
+    // Re-enable OrbitControls when finishing vertex drag
+    if (controls) {
+      (controls as any).enabled = true;
+    }
   };
 
   return (
