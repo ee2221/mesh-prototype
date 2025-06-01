@@ -4,20 +4,69 @@ import { OrbitControls, TransformControls, Grid } from '@react-three/drei';
 import { useSceneStore } from '../store/sceneStore';
 import * as THREE from 'three';
 
-const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { position: THREE.Vector3, selected: boolean, onClick: () => void, vertexIndex: number }) => {
+// Maya-like soft selection falloff curve
+const calculateFalloff = (distance: number, radius: number = 2, falloffMode: 'linear' | 'smooth' | 'cubic' = 'smooth'): number => {
+  if (distance >= radius) return 0;
+  const t = distance / radius;
+  
+  switch (falloffMode) {
+    case 'linear':
+      return 1 - t;
+    case 'cubic':
+      return Math.pow(1 - t, 3);
+    case 'smooth':
+    default:
+      // Maya's default smooth falloff curve
+      const x = 1 - t;
+      return x * x * (3 - 2 * x);
+  }
+};
+
+// Subdivision surface smoothing
+const smoothVertex = (
+  geometry: THREE.BufferGeometry,
+  vertexIndex: number,
+  influence: number,
+  delta: THREE.Vector3
+) => {
+  const position = geometry.attributes.position;
+  const vertex = new THREE.Vector3().fromBufferAttribute(position, vertexIndex);
+  
+  // Find connected vertices
+  const connectedVertices: number[] = [];
+  for (let i = 0; i < position.count; i++) {
+    if (i === vertexIndex) continue;
+    const other = new THREE.Vector3().fromBufferAttribute(position, i);
+    if (vertex.distanceTo(other) < 0.1) { // Threshold for connected vertices
+      connectedVertices.push(i);
+    }
+  }
+  
+  // Apply weighted movement
+  const newPosition = vertex.clone().add(delta.multiplyScalar(influence));
+  position.setXYZ(vertexIndex, newPosition.x, newPosition.y, newPosition.z);
+  
+  // Smooth connected vertices
+  connectedVertices.forEach(i => {
+    const connected = new THREE.Vector3().fromBufferAttribute(position, i);
+    const smoothInfluence = influence * 0.5; // Reduced influence for connected vertices
+    const smoothDelta = delta.clone().multiplyScalar(smoothInfluence);
+    const smoothedPosition = connected.clone().add(smoothDelta);
+    position.setXYZ(i, smoothedPosition.x, smoothedPosition.y, smoothedPosition.z);
+  });
+};
+
+const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { 
+  position: THREE.Vector3, 
+  selected: boolean, 
+  onClick: () => void, 
+  vertexIndex: number 
+}) => {
   const mesh = useRef<THREE.Mesh>(null);
   const dragStart = useRef<THREE.Vector3>();
   const selectedObject = useSceneStore(state => state.selectedObject as THREE.Mesh);
   const geometry = selectedObject?.geometry as THREE.BufferGeometry;
   const positionAttribute = geometry?.attributes.position;
-
-  // Maya-like soft selection falloff function
-  const calculateFalloff = (distance: number, radius: number = 1): number => {
-    if (distance >= radius) return 0;
-    const t = distance / radius;
-    // Using Maya's soft selection curve approximation
-    return Math.pow(1 - Math.pow(t, 2), 2);
-  };
 
   const onPointerDown = (e: any) => {
     e.stopPropagation();
@@ -30,26 +79,22 @@ const DraggableVertex = ({ position, selected, onClick, vertexIndex }: { positio
   const onPointerMove = (e: any) => {
     if (!dragStart.current || !selected || !positionAttribute || !mesh.current) return;
 
-    // Get pointer position in world space
     const pointer = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
     const delta = pointer.sub(dragStart.current);
     
-    // Convert to object space
     const worldToLocal = selectedObject.matrixWorld.clone().invert();
     const localDelta = delta.clone().applyMatrix4(worldToLocal);
 
-    // Get the selected vertex position
     const selectedVertexPos = new THREE.Vector3().fromBufferAttribute(positionAttribute, vertexIndex);
     
-    // Update vertices with soft selection
+    // Apply smooth deformation with subdivision
     for (let i = 0; i < positionAttribute.count; i++) {
       const vertex = new THREE.Vector3().fromBufferAttribute(positionAttribute, i);
       const distance = vertex.distanceTo(selectedVertexPos);
-      const influence = calculateFalloff(distance, 2);
+      const influence = calculateFalloff(distance, 2, 'smooth');
       
       if (influence > 0) {
-        const newPosition = vertex.clone().add(localDelta.clone().multiplyScalar(influence));
-        positionAttribute.setXYZ(i, newPosition.x, newPosition.y, newPosition.z);
+        smoothVertex(geometry, i, influence, localDelta.clone());
       }
     }
 
@@ -97,14 +142,13 @@ const MeshHelpers = () => {
   const vertexIndices: number[] = [];
   const matrix = selectedObject.matrixWorld;
 
-  // Get unique vertices using a more precise comparison
+  // Get unique vertices with improved precision
   const uniqueVertices = new Map<string, number>();
   for (let i = 0; i < position.count; i++) {
     const vertex = new THREE.Vector3();
     vertex.fromBufferAttribute(position, i);
     vertex.applyMatrix4(matrix);
     
-    // Use higher precision for vertex position comparison
     const key = `${vertex.x.toFixed(6)},${vertex.y.toFixed(6)},${vertex.z.toFixed(6)}`;
     if (!uniqueVertices.has(key)) {
       uniqueVertices.set(key, i);
